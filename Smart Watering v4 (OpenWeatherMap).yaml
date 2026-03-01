@@ -1,0 +1,103 @@
+alias: Smart Watering v4 (OpenWeatherMap)
+description: >
+  Waters daily at 06:00, but reduces/skips based on OpenWeatherMap forecast: max
+  precipitation_probability + expected precipitation in the next hours.
+triggers:
+  - at: "06:00:00"
+    trigger: time
+conditions:
+  - condition: state
+    entity_id: binary_sensor.sonoff_swv_water_supply
+    state: "on"
+  - condition: state
+    entity_id: binary_sensor.sonoff_swv_water_leak
+    state: "off"
+actions:
+  - variables:
+      weather_entity: weather.openweathermap
+      window_hours: 12
+      temp_window_hours: 24
+  - action: weather.get_forecasts
+    target:
+      entity_id: "{{ weather_entity }}"
+    data:
+      type: hourly
+    response_variable: ow
+  - variables:
+      hourly: "{{ ow[weather_entity].forecast | default([]) }}"
+      expected_rain_next_window_mm: >
+        {% set start = now() %} {% set end = now() +
+        timedelta(hours=window_hours) %} {% set ns = namespace(total=0) %} {%
+        for f in hourly %}
+          {% set dt = as_datetime(f.datetime) %}
+          {% if dt and start <= dt <= end %}
+            {% set ns.total = ns.total + (f.precipitation | float(0)) %}
+          {% endif %}
+        {% endfor %} {{ ns.total }}
+      max_rain_chance_next_window: >
+        {% set start = now() %} {% set end = now() +
+        timedelta(hours=window_hours) %} {% set ns = namespace(mx=0) %} {% for f
+        in hourly %}
+          {% set dt = as_datetime(f.datetime) %}
+          {% if dt and start <= dt <= end %}
+            {% set pop = f.precipitation_probability %}
+            {% if pop is not none %}
+              {% set pop = pop | float(0) %}
+            {% else %}
+              {% set pop = 0 %}
+            {% endif %}
+            {% if pop > ns.mx %}{% set ns.mx = pop %}{% endif %}
+          {% endif %}
+        {% endfor %} {{ ns.mx }}
+      max_temp_next_24h: >
+        {% set start = now() %} {% set end = now() +
+        timedelta(hours=temp_window_hours) %} {% set ns = namespace(mx=-999) %}
+        {% for f in hourly %}
+          {% set dt = as_datetime(f.datetime) %}
+          {% if dt and start <= dt <= end %}
+            {% set t = f.temperature | float(0) %}
+            {% if t > ns.mx %}{% set ns.mx = t %}{% endif %}
+          {% endif %}
+        {% endfor %} {% if ns.mx == -999 %} 0 {% else %} {{ ns.mx }} {% endif %}
+      base_minutes: >
+        {% set t = max_temp_next_24h | float(0) %} {% if t >= 30 %} 15 {% elif t
+        >= 24 %} 10 {% elif t >= 18 %} 7 {% else %} 4 {% endif %}
+      watering_minutes: >
+        {% set base = base_minutes | int(0) %} {% set pop =
+        max_rain_chance_next_window | float(0) %} {% set rain =
+        expected_rain_next_window_mm | float(0) %} {% if rain >= 2 or pop >= 50
+        %} 0 {% elif rain >= 1 or pop >= 30 %} {{ (base * 0.6) | round(0) | int
+        }} {% elif rain >= 0.3 or pop >= 15 %} {{ (base * 0.8) | round(0) | int
+        }} {% else %} {{ base }} {% endif %}
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ watering_minutes | int(0) <= 0 }}"
+        sequence:
+          - action: persistent_notification.create
+            data:
+              title: Watering skipped
+              message: >
+                Skipped (OWM). Next {{ window_hours }}h: max_pop={{
+                max_rain_chance_next_window | round(0) }}%, expected_rain={{
+                expected_rain_next_window_mm | round(2) }}mm. Next 24h max
+                temp={{ max_temp_next_24h | round(1) }}°C.
+    default:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.sonoff_swv
+      - delay:
+          seconds: "{{ (watering_minutes | int(0)) * 60 }}"
+      - action: switch.turn_off
+        target:
+          entity_id: switch.sonoff_swv
+        continue_on_error: true
+      - action: persistent_notification.create
+        data:
+          title: Watering done
+          message: >
+            Watered {{ watering_minutes }} min (OWM). Next {{ window_hours }}h:
+            max_pop={{ max_rain_chance_next_window | round(0) }}%,
+            expected_rain={{ expected_rain_next_window_mm | round(2) }}mm. Next
+            24h max temp={{ max_temp_next_24h | round(1) }}°C.
+mode: single
