@@ -1,0 +1,16 @@
+alias: Smart Watering - Max runtime failsafe
+description: Turns valve off if it stays ON too long (safety backstop).
+triggers:
+  - entity_id: switch.sonoff_swv
+    to: "on"
+    for: "00:20:00"
+    trigger: state
+actions:
+  - action: switch.turn_off
+    target:
+      entity_id: switch.sonoff_swv
+  - action: persistent_notification.create
+    data:
+      title: Watering failsafe triggered
+      message: Valve was ON for 20 minutes. Turned OFF automatically.
+mode: single
