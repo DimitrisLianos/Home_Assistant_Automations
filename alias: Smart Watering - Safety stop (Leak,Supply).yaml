@@ -1,0 +1,27 @@
+alias: Smart Watering - Safety stop (Leak,Supply)
+description: Immediately stops watering if leak detected or water supply is lost.
+triggers:
+  - entity_id: binary_sensor.sonoff_swv_water_leak
+    to: "on"
+    trigger: state
+  - entity_id: binary_sensor.sonoff_swv_water_supply
+    to: "off"
+    trigger: state
+actions:
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: switch.sonoff_swv
+            state: "on"
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: switch.sonoff_swv
+  - action: persistent_notification.create
+    data:
+      title: Watering stopped (safety)
+      message: >
+        {% set ent = trigger.entity_id | default('manual_run') %} {% set to =
+        trigger.to_state.state | default('n/a') %} Trigger={{ ent }} changed to
+        {{ to }}. Valve turned off (if it was on).
+mode: single
