@@ -1,16 +1,19 @@
-alias: Smart Watering - Max runtime failsafe
-description: Turns valve off if it stays ON too long (safety backstop).
+alias: "Safety: Auto-Close Water Valve"
+description: Prevents flooding if the main automation crashes during the delay.
 triggers:
-  - entity_id: switch.sonoff_swv
+  - trigger: state
+    entity_id: switch.sonoff_swv
     to: "on"
-    for: "00:20:00"
-    trigger: state
+    for:
+      hours: 0
+      minutes: 20
+      seconds: 0
 actions:
   - action: switch.turn_off
     target:
       entity_id: switch.sonoff_swv
   - action: persistent_notification.create
     data:
-      title: Watering failsafe triggered
-      message: Valve was ON for 20 minutes. Turned OFF automatically.
+      title: "⚠️ WATER VALVE SAFETY TRIGGERED"
+      message: "The Sonoff valve was left open for more than 20 minutes. It has been forced closed to prevent flooding."
 mode: single
